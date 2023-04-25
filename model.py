@@ -23,7 +23,6 @@ class PointWiseFeedForward(torch.nn.Module):
 
 
 class TimeAwareMultiHeadAttention(torch.nn.Module):
-    # required homebrewed mha layer for Ti/SASRec experiments
     def __init__(self, hidden_size, head_num, dropout_rate, dev):
         super(TimeAwareMultiHeadAttention, self).__init__()
         self.Q_w = torch.nn.Linear(hidden_size, hidden_size)
@@ -63,7 +62,6 @@ class TimeAwareMultiHeadAttention(torch.nn.Module):
         # key masking, -2^32 lead to leaking, inf lead to nan
         # 0 * inf = nan, then reduce_sum([nan,...]) = nan
 
-        # fixed a bug pointed out in https://github.com/pmixer/TiSASRec.pytorch/issues/2
         # time_mask = time_mask.unsqueeze(-1).expand(attn_weights.shape[0], -1, attn_weights.shape[-1])
         time_mask = time_mask.unsqueeze(-1).repeat(self.head_num, 1, 1)
         time_mask = time_mask.expand(-1, -1, attn_weights.shape[-1])
@@ -73,9 +71,7 @@ class TimeAwareMultiHeadAttention(torch.nn.Module):
         attn_weights = torch.where(time_mask, paddings, attn_weights)  # True:pick padding
         attn_weights = torch.where(attn_mask, paddings, attn_weights)  # enforcing causality
 
-        attn_weights = self.softmax(attn_weights)  # code as below invalids pytorch backward rules
-        # attn_weights = torch.where(time_mask, paddings, attn_weights) # weird query mask in tf impl
-        # https://discuss.pytorch.org/t/how-to-set-nan-in-tensor-to-0/3918/4
+        attn_weights = self.softmax(attn_weights)
         # attn_weights[attn_weights != attn_weights] = 0 # rm nan for -inf into softmax case
         attn_weights = self.dropout(attn_weights)
 

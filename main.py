@@ -112,10 +112,8 @@ if __name__ == '__main__':
             loss = bce_criterion(pos_logits[indices], pos_labels[indices])
             loss += bce_criterion(neg_logits[indices], neg_labels[indices])
             for param in model.item_emb.parameters(): loss += args.l2_emb * torch.norm(param)
-            '''
             for param in model.abs_pos_K_emb.parameters(): loss += args.l2_emb * torch.norm(param)
             for param in model.abs_pos_V_emb.parameters(): loss += args.l2_emb * torch.norm(param)
-            '''
             for param in model.time_matrix_K_emb.parameters(): loss += args.l2_emb * torch.norm(param)
             for param in model.time_matrix_V_emb.parameters(): loss += args.l2_emb * torch.norm(param)
             loss.backward()
@@ -141,7 +139,7 @@ if __name__ == '__main__':
 
         if epoch == args.num_epochs:
             folder = args.dataset + '_' + args.train_dir
-            fname = 'TiSASRec.epoch={}.lr={}.layer={}.head={}.hidden={}.maxlen={}.pth'
+            fname = 'MFITSRec.epoch={}.lr={}.layer={}.head={}.hidden={}.maxlen={}.pth'
             fname = fname.format(args.num_epochs, args.lr, args.num_blocks, args.num_heads, args.hidden_units, args.maxlen)
             torch.save(model.state_dict(), os.path.join(folder, fname))
 
