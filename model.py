@@ -39,8 +39,7 @@ class TimeAwareMultiHeadAttention(torch.nn.Module):
         self.dropout_rate = dropout_rate
         self.dev = dev
 
-    def forward(self, queries, keys, time_mask, attn_mask, time_matrix_K, time_matrix_V):
-        ''',abs_pos_K, abs_pos_V):'''
+    def forward(self, queries, keys, time_mask, attn_mask, time_matrix_K, time_matrix_V, abs_pos_K, abs_pos_V):
         Q, K, V = self.Q_w(queries), self.K_w(keys), self.V_w(keys)
 
         # head dim * batch dim for parallelization (h*N, T, C/h)
@@ -50,52 +49,16 @@ class TimeAwareMultiHeadAttention(torch.nn.Module):
 
         time_matrix_K_ = torch.cat(torch.split(time_matrix_K, self.head_size, dim=3), dim=0)
         time_matrix_V_ = torch.cat(torch.split(time_matrix_V, self.head_size, dim=3), dim=0)
-        '''
         abs_pos_K_ = torch.cat(torch.split(abs_pos_K, self.head_size, dim=2), dim=0)
         abs_pos_V_ = torch.cat(torch.split(abs_pos_V, self.head_size, dim=2), dim=0)
-        '''
-
-        # 拆分QKV
-        tc_Q = torch.chunk(Q_, chunks=3, dim=-1)
-        tc_K = torch.chunk(K_, chunks=3, dim=-1)
-        tc_V = torch.chunk(V_, chunks=3, dim=-1)
-        '''
-        tc_pos_K_ = torch.chunk(abs_pos_K_, chunks=3, dim=-1)
-        '''
-        tc_time_matrix_K_ = torch.chunk(time_matrix_K_, chunks=3, dim=-1)
-        Q_id, Q_b, Q_c = tc_Q[0], tc_Q[1], tc_Q[2]
-        K_id, K_b, K_c = tc_K[0], tc_K[1], tc_K[2]
-        V_id, V_b, V_c = tc_V[0], tc_V[1], tc_V[2]
-        '''
-        pos_K_id, pos_K_b, pos_K_c = tc_pos_K_[0], tc_pos_K_[1], tc_pos_K_[2]
-        '''
-        time_matrix_K_id, time_matrix_K_b, time_matrix_K_c = tc_time_matrix_K_[0], tc_time_matrix_K_[1], tc_time_matrix_K_[2]
-        # print(Q_id)
 
         # batched channel wise matmul to gen attention weights
         attn_weights = Q_.matmul(torch.transpose(K_, 1, 2))
-        attn_w_id = Q_id.matmul(torch.transpose(K_id, 1, 2))
-        attn_w_b = Q_b.matmul(torch.transpose(K_b, 1, 2))
-        attn_w_c = Q_c.matmul(torch.transpose(K_c, 1, 2))
-
-        '''
         attn_weights += Q_.matmul(torch.transpose(abs_pos_K_, 1, 2))
-        attn_w_id += Q_id.matmul(torch.transpose(pos_K_id, 1, 2))
-        attn_w_b += Q_b.matmul(torch.transpose(pos_K_b, 1, 2))
-        attn_w_c += Q_c.matmul(torch.transpose(pos_K_c, 1, 2))
-        '''
-
         attn_weights += time_matrix_K_.matmul(Q_.unsqueeze(-1)).squeeze(-1)
-        attn_w_id += time_matrix_K_id.matmul(Q_id.unsqueeze(-1)).squeeze(-1)
-        attn_w_b += time_matrix_K_b.matmul(Q_b.unsqueeze(-1)).squeeze(-1)
-        attn_w_c += time_matrix_K_c.matmul(Q_c.unsqueeze(-1)).squeeze(-1)
 
         # seq length adaptive scaling
         attn_weights = attn_weights / (K_.shape[-1] ** 0.5)
-        attn_w_id = attn_w_id / (K_id.shape[-1] ** 0.5)
-        attn_w_b = attn_w_b / (K_b.shape[-1] ** 0.5)
-        attn_w_c = attn_w_c / (K_c.shape[-1] ** 0.5)
-
 
         # key masking, -2^32 lead to leaking, inf lead to nan
         # 0 * inf = nan, then reduce_sum([nan,...]) = nan
@@ -105,32 +68,30 @@ class TimeAwareMultiHeadAttention(torch.nn.Module):
         time_mask = time_mask.unsqueeze(-1).repeat(self.head_num, 1, 1)
         time_mask = time_mask.expand(-1, -1, attn_weights.shape[-1])
         attn_mask = attn_mask.unsqueeze(0).expand(attn_weights.shape[0], -1, -1)
-        paddings = torch.ones(attn_weights.shape) *  (-2**32+1) # -1e23 # float('-inf')
+        paddings = torch.ones(attn_weights.shape) * (-2 ** 32 + 1)  # -1e23 # float('-inf')
         paddings = paddings.to(self.dev)
-        attn_weights = torch.where(time_mask, paddings, attn_weights) # True:pick padding
-        attn_weights = torch.where(attn_mask, paddings, attn_weights) # enforcing causality
+        attn_weights = torch.where(time_mask, paddings, attn_weights)  # True:pick padding
+        attn_weights = torch.where(attn_mask, paddings, attn_weights)  # enforcing causality
 
-        attn_weights = self.softmax(attn_weights) # code as below invalids pytorch backward rules
+        attn_weights = self.softmax(attn_weights)  # code as below invalids pytorch backward rules
         # attn_weights = torch.where(time_mask, paddings, attn_weights) # weird query mask in tf impl
         # https://discuss.pytorch.org/t/how-to-set-nan-in-tensor-to-0/3918/4
         # attn_weights[attn_weights != attn_weights] = 0 # rm nan for -inf into softmax case
         attn_weights = self.dropout(attn_weights)
 
         outputs = attn_weights.matmul(V_)
-        '''
         outputs += attn_weights.matmul(abs_pos_V_)
-        '''
         outputs += attn_weights.unsqueeze(2).matmul(time_matrix_V_).reshape(outputs.shape).squeeze(2)
 
         # (num_head * N, T, C / num_head) -> (N, T, C)
-        outputs = torch.cat(torch.split(outputs, Q.shape[0], dim=0), dim=2) # div batch_size
+        outputs = torch.cat(torch.split(outputs, Q.shape[0], dim=0), dim=2)  # div batch_size
 
-        return outputs, attn_weights, attn_w_id, attn_w_b, attn_w_c
+        return outputs
 
 
-class TiSASRec(torch.nn.Module): # similar to torch.nn.MultiheadAttention
+class MFITSRec(torch.nn.Module): # similar to torch.nn.MultiheadAttention
     def __init__(self, user_num, item_num, time_num,bnum,cnum, args):
-        super(TiSASRec, self).__init__()
+        super(MFITSRec, self).__init__()
 
         self.user_num = user_num
         self.item_num = item_num
@@ -145,18 +106,16 @@ class TiSASRec(torch.nn.Module): # similar to torch.nn.MultiheadAttention
         self.item_c = torch.nn.Embedding(self.c_num + 1, args.d_c, padding_idx=0)
         self.item_emb_dropout = torch.nn.Dropout(p=args.dropout_rate)
 
-        '''
+
         self.abs_pos_K_emb = torch.nn.Embedding(args.maxlen, args.hidden_units)
         self.abs_pos_V_emb = torch.nn.Embedding(args.maxlen, args.hidden_units)
-        '''
         self.time_matrix_K_emb = torch.nn.Embedding(args.time_span+1, args.hidden_units)
         self.time_matrix_V_emb = torch.nn.Embedding(args.time_span+1, args.hidden_units)
 
         self.item_emb_dropout = torch.nn.Dropout(p=args.dropout_rate)
-        '''
+
         self.abs_pos_K_emb_dropout = torch.nn.Dropout(p=args.dropout_rate)
         self.abs_pos_V_emb_dropout = torch.nn.Dropout(p=args.dropout_rate)
-        '''
         self.time_matrix_K_dropout = torch.nn.Dropout(p=args.dropout_rate)
         self.time_matrix_V_dropout = torch.nn.Dropout(p=args.dropout_rate)
 
@@ -207,7 +166,7 @@ class TiSASRec(torch.nn.Module): # similar to torch.nn.MultiheadAttention
             item_seq.append(item)
             item = []
 
-        item_seq = np.array(item_seq)  # 将log_seqs中的物品id加上元数据   (batch_size, maxlen, num_attribute + 1)
+        item_seq = np.array(item_seq)
         item_ids = item_seq[:, :, 0:1].reshape(a, b)
         item_b = item_seq[:, :, 1:2].reshape(a, b)
         item_c = item_seq[:, :, 2:].reshape(a, b)
@@ -250,10 +209,9 @@ class TiSASRec(torch.nn.Module): # similar to torch.nn.MultiheadAttention
             # Self-attention, Q=layernorm(seqs), K=V=seqs
             # seqs = torch.transpose(seqs, 0, 1) # (N, T, C) -> (T, N, C)
             Q = self.attention_layernorms[i](seqs) # PyTorch mha requires time first fmt
-            mha_outputs, att_w, attn_w_id, attn_w_b, attn_w_c = self.attention_layers[i](Q, seqs,
+            mha_outputs = self.attention_layers[i](Q, seqs,
                                             timeline_mask, attention_mask,
-                                            time_matrix_K, time_matrix_V)
-            '''abs_pos_K, abs_pos_V'''
+                                            time_matrix_K, time_matrix_V, abs_pos_K, abs_pos_V)
             seqs = Q + mha_outputs
             # seqs = torch.transpose(seqs, 0, 1) # (T, N, C) -> (N, T, C)
 
@@ -264,10 +222,10 @@ class TiSASRec(torch.nn.Module): # similar to torch.nn.MultiheadAttention
 
         log_feats = self.last_layernorm(seqs)
 
-        return log_feats, att_w, attn_w_id, attn_w_b, attn_w_c
+        return log_feats
 
     def forward(self, user_ids, log_seqs, time_matrices, pos_seqs, neg_seqs,item_meta): # for training
-        log_feats, att_w, attn_w_id, attn_w_b, attn_w_c = self.seq2feats(log_seqs, time_matrices, item_meta)
+        log_feats = self.seq2feats(log_seqs, time_matrices, item_meta)
 
         pos_seq, pos_ids, pos_b, pos_c = self.Item_Meta(pos_seqs, item_meta)
         neg_seq, neg_ids, neg_b, neg_c = self.Item_Meta(neg_seqs, item_meta)
@@ -290,10 +248,10 @@ class TiSASRec(torch.nn.Module): # similar to torch.nn.MultiheadAttention
         # pos_pred = self.pos_sigmoid(pos_logits)
         # neg_pred = self.neg_sigmoid(neg_logits)
 
-        return pos_logits, neg_logits, att_w, attn_w_id, attn_w_b, attn_w_c # pos_pred, neg_pred
+        return pos_logits, neg_logits # pos_pred, neg_pred
 
     def predict(self, user_ids, log_seqs, time_matrices, item_indices,item_meta): # for inference
-        log_feats, att_w, attn_w_id, attn_w_b, attn_w_c = self.seq2feats(log_seqs, time_matrices,item_meta)
+        log_feats = self.seq2feats(log_seqs, time_matrices,item_meta)
         item_indices = item_indices.reshape(1, -1)
         seq, ids, b, c = self.Item_Meta(item_indices, item_meta)
 

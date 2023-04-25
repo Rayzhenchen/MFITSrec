@@ -144,54 +144,6 @@ def cleanAndsort(User, time_map):
     return User_res, len(user_set), len(item_set), max(time_max)
 
 def data_partition(fname):
-    # print('Preparing data...')
-    # f = open('data/%s.txt' % fname, 'r')
-    # time_set = set()
-    #
-    # # user_count = defaultdict(int)
-    # # item_count = defaultdict(int)
-    # usernum = 0
-    # itemnum = 0
-    # bnum = 0
-    # cnum = 0
-    # User = defaultdict(list)  # 初始化字典，用户历史序列字典
-    # user_train = {}
-    # user_valid = {}
-    # user_test = {}
-    # item_meta = {}
-    # # assume user/item index starting from 1
-    # # 假设用户/物品索引从 1 开始
-    # f = open('data/%s.txt' % fname, 'r')  # 打开相应数据集
-    #
-    # user_count = defaultdict(int)
-    # item_count = defaultdict(int)
-    # for line in f:  # 一行一行打印
-    #     u, i, timestamp, b, c = line.rstrip().split(' ')  # 每行以空格切分 u 和 i
-    #     u = int(u)
-    #     i = int(i)
-    #     timestamp = float(timestamp)
-    #     b = int(b)
-    #     c = int(c)
-    #     # usernum = max(u, usernum)
-    #     # itemnum = max(i, itemnum)
-    #     bnum = max(b, bnum)
-    #     cnum = max(c, cnum)
-    #
-    #     item_meta[i] = []
-    #     item_meta[i].append(b)
-    #     item_meta[i].append(c)
-    #
-    #     user_count[u] += 1
-    #     item_count[i] += 1
-    #
-    #     if user_count[u] < 5 or item_count[i] < 5:  # hard-coded
-    #         continue
-    #     time_set.add(timestamp)
-    #     # 输出字典{u：[和 u 交互的 i]}
-    #     User[u].append([i, timestamp])
-    # f.close()
-    # time_map = timeSlice(time_set)
-    # User, usernum, itemnum, timenum = cleanAndsort(User, time_map)
 
     print('Preparing data...')
     f = open('data/%s.txt' % fname, 'r')
@@ -209,7 +161,6 @@ def data_partition(fname):
     user_test = {}
     item_meta = {}
     # assume user/item index starting from 1
-    # 假设用户/物品索引从 1 开始
     f = open('data/%s.txt' % fname, 'r')
     time_set = set()
 
@@ -221,12 +172,6 @@ def data_partition(fname):
         i = int(i)
         user_count[u] += 1
         item_count[i] += 1
-    # f.close()
-    # f = open('data/%s.txt' % fname, 'r')  # 打开相应数据集
-    # for line in f:  # 一行一行打印
-    #     u, i, timestamp, b, c = line.rstrip().split(' ')  # 每行以空格切分 u 和 i
-    #     u = int(u)
-    #     i = int(i)
         timestamp = float(timestamp)
         b = int(b)
         c = int(c)
@@ -234,7 +179,7 @@ def data_partition(fname):
         itemnum = max(i, itemnum)
         bnum = max(b, bnum)
         cnum = max(c, cnum)
-        # 输出字典{u：[和 u 交互的 i]}
+
         item_meta[i] = []
         item_meta[i].append(b)
         item_meta[i].append(c)
@@ -308,7 +253,7 @@ def evaluate(model, dataset, args):
 
         valid_user += 1
 
-        if rank < 5:
+        if rank < 10:
             NDCG += 1 / np.log2(rank + 2)
             HT += 1
         if valid_user % 100 == 0:
@@ -357,7 +302,7 @@ def evaluate_valid(model, dataset, args):
 
         valid_user += 1
 
-        if rank < 5:
+        if rank < 10:
             NDCG += 1 / np.log2(rank + 2)
             HT += 1
         if valid_user % 100 == 0:

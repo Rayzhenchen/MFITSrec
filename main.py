@@ -8,7 +8,7 @@ import argparse
 import matplotlib.pyplot as plt
 
 
-from model import TiSASRec
+from model import MFITSRec
 from tqdm import tqdm
 from utils import *
 
@@ -20,11 +20,11 @@ def str2bool(s):
     return s == 'true'
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', default='ml-1m_item')
-parser.add_argument('--train_dir', default='10')
-parser.add_argument('--batch_size', default=32, type=int)
+parser.add_argument('--dataset', required=True)
+parser.add_argument('--train_dir', required=True)
+parser.add_argument('--batch_size', default=512, type=int)
 parser.add_argument('--lr', default=0.001, type=float)
-parser.add_argument('--maxlen', default=200, type=int)
+parser.add_argument('--maxlen', default=10, type=int)
 parser.add_argument('--hidden_units', default=150, type=int)
 parser.add_argument('--item_hidden_units', default=50, type=int)
 parser.add_argument('--d_c', default=50, type=int)
@@ -67,7 +67,7 @@ if __name__ == '__main__':
         pickle.dump(relation_matrix, open('data/relation_matrix_%s_%d_%d.pickle'%(args.dataset, args.maxlen, args.time_span),'wb'))
 
     sampler = WarpSampler(user_train, usernum, itemnum, relation_matrix, batch_size=args.batch_size, maxlen=args.maxlen, n_workers=3)
-    model = TiSASRec(usernum, itemnum, timenum, bnum, cnum, args).to(args.device)
+    model = MFITSRec(usernum, itemnum, timenum, bnum, cnum, args).to(args.device)
 
     for name, param in model.named_parameters():
         try:
@@ -104,7 +104,7 @@ if __name__ == '__main__':
             u, seq, time_seq, time_matrix, pos, neg = sampler.next_batch() # tuples to ndarray
             u, seq, pos, neg = np.array(u), np.array(seq), np.array(pos), np.array(neg)
             time_seq, time_matrix = np.array(time_seq), np.array(time_matrix)
-            pos_logits, neg_logits, att_w, attn_w_id, attn_w_b, attn_w_c = model(u, seq, time_matrix, pos, neg,item_meta)
+            pos_logits, neg_logits = model(u, seq, time_matrix, pos, neg,item_meta)
             pos_labels, neg_labels = torch.ones(pos_logits.shape, device=args.device), torch.zeros(neg_logits.shape, device=args.device)
             # print("\neye ball check raw_logits:"); print(pos_logits); print(neg_logits) # check pos_logits > 0, neg_logits < 0
             adam_optimizer.zero_grad()
@@ -123,7 +123,7 @@ if __name__ == '__main__':
 
             print("loss in epoch {} iteration {}: {}".format(epoch, step, loss.item())) # expected 0.4~0.6 after init few epochs
 
-        if epoch % 1 == 0:
+        if epoch % 20 == 0:
             model.eval()
             t1 = time.time() - t0
             T += t1
@@ -140,62 +140,7 @@ if __name__ == '__main__':
             model.train()
 
         if epoch == args.num_epochs:
-            # print('att_w: ', att_w)
-            # print('att_w_id', attn_w_id)
-            # print('att_w_b', attn_w_b)
-            # print('att_w_c', attn_w_c)
-
-            # attn_w_b = attn_w_b[0]
-            # attn_w_c = attn_w_c[0]
-            # attn_w_id = attn_w_id[0]
-            # att = torch.cat([attn_w_id, attn_w_b, attn_w_c], dim=1)
-            # print(att.shape, att)
-            # folder = args.dataset + '_' + args.train_dir
-            # txt = open(folder + '/att_w.txt', 'w')
-            # attn_w_b = attn_w_b.cpu()
-            # attn_w_b = attn_w_b.detach().numpy()
-            # attn_w_c = attn_w_c.cpu()
-            # attn_w_c = attn_w_c.detach().numpy()
-            # attn_w_id = attn_w_id.cpu()
-            # attn_w_id = attn_w_id.detach().numpy()
-            #
-            # att = att.cpu()
-            # att = att.detach().numpy()
-            # # np.savetxt(r'Test.txt', attn_w_b, fmt='%d', delimiter=',')  # 存储矩阵Test
-            # # np.savetxt(folder + '/att_w.txt', attn_w_b)
-            # # txt.write(str(attn_w_b))
-            # txt.close()
-            #
-            # plt.matshow(att, fignum=48, cmap='Blues', vmin=-1, vmax=1)
-            # plt.colorbar(cax=None, ax=None, shrink=0.8)
-            # plt.show()
-
-
-            # plt.matshow(attn_w_b, fignum=48, cmap='Blues', vmin=0, vmax=1)
-            # plt.colorbar(cax=None, ax=None, shrink=0.8)
-            # plt.show()
-            # plt.matshow(attn_w_c, fignum=48, cmap='pink', vmin=0, vmax=1)
-            # plt.colorbar(cax=None, ax=None, shrink=0.8)
-            # plt.show()
-            # plt.matshow(attn_w_id, fignum=48, cmap='Greens', vmin=0, vmax=1)
-            # plt.colorbar(cax=None, ax=None, shrink=0.8)
-            # # plt.title("Foursquare")
-            # # plt.savefig('D:\桌面\\Foursquare_time_sim_matrix.png')
-            # plt.show()
-
-            att = torch.cat([attn_w_id, attn_w_b, attn_w_c], dim=2)
-            att_w = att_w.cpu()
-            att_w = att_w.detach().numpy()
-            att = att.cpu()
-            att = att.detach().numpy()
-            # attn_w_id = attn_w_id.numpy()
-            # attn_w_b = attn_w_b.numpy()
-            # attn_w_c = attn_w_c.numpy()
-
             folder = args.dataset + '_' + args.train_dir
-            np.save(folder + '/att_w.npy', att_w)
-            np.save(folder + '/att.npy', att)
-
             fname = 'TiSASRec.epoch={}.lr={}.layer={}.head={}.hidden={}.maxlen={}.pth'
             fname = fname.format(args.num_epochs, args.lr, args.num_blocks, args.num_heads, args.hidden_units, args.maxlen)
             torch.save(model.state_dict(), os.path.join(folder, fname))
